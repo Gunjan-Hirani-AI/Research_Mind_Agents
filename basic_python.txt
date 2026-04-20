@@ -1,0 +1,71 @@
+if i wrote like 'from x import y' , then it means is that x is a Module/Pakage(Module means one file in the X) , y is a something defined inside the module which can be anything like variable , function , submodule anything...
+
+Go inside module/package X and bring Y into my current file.
+
+example :
+from langchain.tools import tools , here the lanchain.tools is a module and tools(after the import) is a something in the lanchain.tools module
+
+==================================
+
+To create a tool in LangChain:
+
+First write a normal Python function
+Then add the decorator @tool
+After adding the decorator, the function is no longer a normal function
+It becomes a StructuredTool object
+
+@tool
+def web_search(query: str) -> str:
+    """Search the web for recent and reliable information."""
+    results = tavily.search(query, max_results=5)
+    return results
+
+
+2. Important
+
+After using @tool:
+
+❌ You CANNOT run it like a normal function:
+web_search("hello") → Error
+
+Because now:
+👉 web_search is a StructuredTool object, not a function.
+
+to run the tool, just write this line after the tool
+
+web_search.invoke({"query": "Virat Kohli's recent performance in cricket?"})
+
+
+==================================
+
+Python f-string:
+
+
+except Exception as e:
+    return f"Error fetching URL: {e}"
+
+f"" means formatted string (f-string) in Python.
+It allows inserting dynamic values inside { }.
+Here {e} will be replaced with the actual error message.
+
+Example:
+
+e = "Connection timeout"
+return f"Error fetching URL: {e}"
+
+Output:
+
+Error fetching URL: Connection timeout
+
+❌ Why we don't use return print(...)
+
+return print("Error fetching URL:", e)
+
+print() only shows text on the terminal.
+print() returns None, so return print(...) becomes:
+
+return None
+
+That’s why we use f-string with return, not print().
+f-string does not same as print
+==================================
