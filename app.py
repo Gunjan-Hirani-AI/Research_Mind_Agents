@@ -1,482 +1,386 @@
-import streamlit as st
-import time
-import os
-from agents import build_read_agent, build_search_agent, writer_chain, critic_chain
+"""
+🧠 Research Mind — Multi-Agent Research System UI
+A polished Streamlit dashboard for `run_research_pipeline` from pipeline.py.
 
-# ── Page config ──────────────────────────────────────────────────────────────
+Run locally:
+    pip install streamlit
+    streamlit run app.py
+"""
+
+import time
+import io
+import sys
+import threading
+import streamlit as st
+
+# ---- Import your pipeline pieces directly so we can drive each agent and
+# show live "running / done" status instead of one big black-box call. ----
+from agents import build_search_agent, build_read_agent, writer_chain, critic_chain
+
+
+# ============================================================
+# PAGE CONFIG + GLOBAL STYLES
+# ============================================================
 st.set_page_config(
-    page_title="ResearchMind · AI Research Agent",
-    page_icon="🔬",
+    page_title="Research Mind • Multi-Agent System",
+    page_icon="🧠",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── Helper: Read file content ────────────────────────────────────────────────
-def read_file(path):
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return f.read()
-    return "File not found."
-
-# ── Custom CSS ────────────────────────────────────────────────────────────────
-st.markdown("""
+CUSTOM_CSS = """
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');
-
-/* ── Reset & base ── */
-html, body, [class*="css"] {
-    font-family: 'DM Sans', sans-serif;
-    color: #e8e4dc;
-}
-
-.stApp {
-    background: #0a0a0f;
-    background-image:
-        radial-gradient(ellipse 80% 50% at 20% -10%, rgba(255,140,50,0.12) 0%, transparent 60%),
-        radial-gradient(ellipse 60% 40% at 80% 110%, rgba(255,80,30,0.08) 0%, transparent 55%);
-}
-
-/* ── Hide default streamlit chrome ── */
-#MainMenu, footer, header { visibility: hidden; }
-.block-container { padding: 2rem 3rem 4rem; max-width: 1200px; }
-
-/* ── Hero header ── */
-.hero {
-    text-align: center;
-    padding: 2rem 0 1.5rem;
-    position: relative;
-}
-.hero-eyebrow {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.7rem;
-    font-weight: 500;
-    letter-spacing: 0.25em;
-    text-transform: uppercase;
-    color: #ff8c32;
-    margin-bottom: 0.8rem;
-    opacity: 0.9;
-}
-.hero h1 {
-    font-family: 'Syne', sans-serif;
-    font-size: clamp(2.5rem, 5vw, 4rem);
-    font-weight: 800;
-    line-height: 1.0;
-    letter-spacing: -0.03em;
-    color: #f0ebe0;
-    margin: 0 0 1rem;
-}
-.hero h1 span {
-    color: #ff8c32;
-}
-.hero-sub {
-    font-size: 1rem;
-    font-weight: 300;
-    color: #a09890;
-    max-width: 520px;
-    margin: 0 auto;
-    line-height: 1.6;
-}
-
-/* ── Divider ── */
-.divider {
-    height: 1px;
-    background: linear-gradient(90deg, transparent, rgba(255,140,50,0.3), transparent);
-    margin: 1.5rem 0;
-}
-
-/* ── Streamlit input overrides ── */
-.stTextInput > div > div > input {
-    background: rgba(255,255,255,0.05) !important;
-    border: 1px solid rgba(255,140,50,0.25) !important;
-    border-radius: 10px !important;
-    color: #f0ebe0 !important;
-    font-family: 'DM Sans', sans-serif !important;
-    font-size: 1rem !important;
-    padding: 0.75rem 1rem !important;
-    transition: border-color 0.2s, box-shadow 0.2s !important;
-}
-.stTextInput > div > div > input:focus {
-    border-color: #ff8c32 !important;
-    box-shadow: 0 0 0 3px rgba(255,140,50,0.12) !important;
-}
-.stTextInput > label {
-    font-family: 'DM Mono', monospace !important;
-    font-size: 0.72rem !important;
-    letter-spacing: 0.15em !important;
-    text-transform: uppercase !important;
-    color: #ff8c32 !important;
-    font-weight: 500 !important;
-}
-
-/* ── Button ── */
-.stButton > button {
-    background: linear-gradient(135deg, #ff8c32 0%, #ff5a1a 100%) !important;
-    color: #0a0a0f !important;
-    font-family: 'Syne', sans-serif !important;
-    font-weight: 700 !important;
-    font-size: 0.95rem !important;
-    letter-spacing: 0.04em !important;
-    border: none !important;
-    border-radius: 10px !important;
-    padding: 0.7rem 2.2rem !important;
-    cursor: pointer !important;
-    transition: transform 0.15s, box-shadow 0.15s, opacity 0.15s !important;
-    box-shadow: 0 4px 20px rgba(255,140,50,0.3) !important;
-    width: 100%;
-}
-.stButton > button:hover {
-    transform: translateY(-2px) !important;
-    box-shadow: 0 8px 28px rgba(255,140,50,0.4) !important;
-    opacity: 0.95 !important;
-}
-.stButton > button:active {
-    transform: translateY(0) !important;
-}
-
-/* ── Pipeline step cards ── */
-.step-card {
-    background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px;
-    padding: 1.5rem 1.8rem;
-    margin-bottom: 1.2rem;
-    position: relative;
-    overflow: hidden;
-    transition: border-color 0.3s;
-}
-.step-card.active {
-    border-color: rgba(255,140,50,0.4);
-    background: rgba(255,140,50,0.04);
-}
-.step-card.done {
-    border-color: rgba(80,200,120,0.3);
-    background: rgba(80,200,120,0.03);
-}
-.step-card::before {
-    content: '';
-    position: absolute;
-    left: 0; top: 0; bottom: 0;
-    width: 3px;
-    border-radius: 14px 0 0 14px;
-    background: rgba(255,255,255,0.05);
-    transition: background 0.3s;
-}
-.step-card.active::before { background: #ff8c32; }
-.step-card.done::before   { background: #50c878; }
-
-.step-header {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    margin-bottom: 0.3rem;
-}
-.step-num {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.68rem;
-    font-weight: 500;
-    letter-spacing: 0.15em;
-    color: #ff8c32;
-    opacity: 0.7;
-}
-.step-title {
-    font-family: 'Syne', sans-serif;
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: #f0ebe0;
-}
-.step-status {
-    margin-left: auto;
-    font-family: 'DM Mono', monospace;
-    font-size: 0.68rem;
-    letter-spacing: 0.1em;
-}
-.status-waiting  { color: #555; }
-.status-running  { color: #ff8c32; }
-.status-done     { color: #50c878; }
-
-/* ── Result panels ── */
-.result-panel {
-    background: rgba(255,255,255,0.025);
-    border: 1px solid rgba(255,255,255,0.07);
-    border-radius: 14px;
-    padding: 1.8rem 2rem;
-    margin-top: 1rem;
-    margin-bottom: 1.5rem;
-}
-.result-panel-title {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.7rem;
-    font-weight: 500;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    color: #ff8c32;
-    margin-bottom: 1rem;
-    padding-bottom: 0.7rem;
-    border-bottom: 1px solid rgba(255,140,50,0.15);
-}
-.result-content {
-    font-size: 0.92rem;
-    line-height: 1.8;
-    color: #cdc8bf;
-    white-space: pre-wrap;
-    font-family: 'DM Sans', sans-serif;
-}
-
-/* ── Report & feedback panels ── */
-.report-panel {
-    background: rgba(255,255,255,0.025);
-    border: 1px solid rgba(255,140,50,0.2);
-    border-radius: 16px;
-    padding: 2rem 2.5rem;
-    margin-top: 1rem;
-}
-.feedback-panel {
-    background: rgba(255,255,255,0.025);
-    border: 1px solid rgba(80,200,120,0.2);
-    border-radius: 16px;
-    padding: 2rem 2.5rem;
-    margin-top: 1rem;
-}
-.panel-label {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.7rem;
-    letter-spacing: 0.2em;
-    text-transform: uppercase;
-    margin-bottom: 1.2rem;
-    padding-bottom: 0.7rem;
-}
-.panel-label.orange {
-    color: #ff8c32;
-    border-bottom: 1px solid rgba(255,140,50,0.15);
-}
-.panel-label.green {
-    color: #50c878;
-    border-bottom: 1px solid rgba(80,200,120,0.15);
-}
-
-/* ── Progress text ── */
-.stSpinner > div { color: #ff8c32 !important; }
-
-/* ── Expander ── */
-details summary {
-    font-family: 'DM Mono', monospace !important;
-    font-size: 0.75rem !important;
-    color: #a09890 !important;
-    letter-spacing: 0.1em !important;
-    cursor: pointer;
-}
-
-/* ── Sidebar tweaks ── */
-[data-testid="stSidebar"] {
-    background-color: #0a0a0f !important;
-    border-right: 1px solid rgba(255,140,50,0.1) !important;
-}
-
-/* ── Section heading ── */
-.section-heading {
-    font-family: 'Syne', sans-serif;
-    font-size: 1.3rem;
-    font-weight: 700;
-    color: #f0ebe0;
-    margin: 2rem 0 1rem;
-}
-
-/* ── Toast-style notice ── */
-.notice {
-    font-family: 'DM Mono', monospace;
-    font-size: 0.72rem;
-    color: #605850;
-    text-align: center;
-    margin-top: 3rem;
-    letter-spacing: 0.08em;
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-# ─── Sidebar (Left Side) ──────────────────────────────────────────────────────
-with st.sidebar:
-    st.markdown("""
-    <div style="text-align:center; padding: 1.5rem 0 1rem 0;">
-        <div style="font-size:2.5rem;">🧠</div>
-        <div style="font-family:'Syne',sans-serif; font-size:1.1rem; font-weight:800; color:#e8e8f0; margin-top:0.4rem;">Research Mind</div>
-        <div style="font-family:'DM Mono',monospace; font-size:0.65rem; color:#7a7a9a; letter-spacing:0.15em; margin-top:0.2rem;">MULTI-AGENT SYSTEM v1.0</div>
-    </div>
-    <hr style="border-color:rgba(255,140,50,0.2); margin-bottom:1.5rem;">
-    """, unsafe_allow_html=True)
-
-    # 📂 System Architecture Diagram
-    with st.expander("📂 View System Architecture Diagram", expanded=False):
-        try:
-            st.image("assets/dfd.png", use_container_width=True)
-        except:
-            st.warning("Diagram image not found.")
-
-    # 📖 readme.md
-    with st.expander("📖 readme.md", expanded=True):
-        st.markdown(f'<div style="font-size:0.8rem; color:#a09890; line-height:1.6; white-space: pre-wrap;">{read_file("readme.md")}</div>', unsafe_allow_html=True)
-
-    # 🛠️ technical_to_do.txt
-    with st.expander("🛠️ technical_to_do.txt", expanded=False):
-        st.markdown(f'<div style="font-size:0.75rem; color:#a09890; line-height:1.6; white-space: pre-wrap;">{read_file("technical_to_do.txt")}</div>', unsafe_allow_html=True)
-
-    st.markdown("""
-    <div style="text-align:center; font-family:'DM Mono',monospace; font-size:0.65rem; color:#4a4a6a; margin-top:5rem;">
-        Research Mind Agent<br>
-        <span style="color:#ff8c32;">© 2025 Autonomous Research</span>
-    </div>
-    """, unsafe_allow_html=True)
-
-
-# ── Helper: render a step card ────────────────────────────────────────────────
-def step_card(num: str, title: str, state: str, desc: str = ""):
-    status_map = {
-        "waiting": ("WAITING", "status-waiting"),
-        "running": ("● RUNNING", "status-running"),
-        "done":    ("✓ DONE",   "status-done"),
+    /* App background gradient */
+    .stApp {
+        background: radial-gradient(1200px 600px at 10% -10%, #1e293b 0%, transparent 60%),
+                    radial-gradient(1000px 500px at 100% 0%, #312e81 0%, transparent 55%),
+                    linear-gradient(180deg, #0b1220 0%, #0a0f1c 100%);
+        color: #e5e7eb;
     }
-    label, cls = status_map.get(state, ("", ""))
-    card_cls = {"running": "active", "done": "done"}.get(state, "")
-    st.markdown(f"""
-    <div class="step-card {card_cls}">
-        <div class="step-header">
-            <span class="step-num">{num}</span>
-            <span class="step-title">{title}</span>
-            <span class="step-status {cls}">{label}</span>
-        </div>
-        {"<div style='font-size:0.82rem;color:#706860;margin-top:0.3rem;'>"+desc+"</div>" if desc else ""}
+
+    /* Hero */
+    .hero {
+        padding: 28px 32px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, rgba(99,102,241,0.18), rgba(236,72,153,0.12));
+        border: 1px solid rgba(148,163,184,0.18);
+        backdrop-filter: blur(8px);
+        margin-bottom: 18px;
+    }
+    .hero h1 {
+        font-size: 2.2rem;
+        margin: 0;
+        background: linear-gradient(90deg, #a5b4fc, #f0abfc, #fda4af);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        font-weight: 800;
+        letter-spacing: -0.02em;
+    }
+    .hero p { color: #cbd5e1; margin-top: 6px; }
+
+    /* Agent card */
+    .agent-card {
+        display: flex; align-items: center; gap: 14px;
+        padding: 14px 16px;
+        border-radius: 14px;
+        border: 1px solid rgba(148,163,184,0.18);
+        background: rgba(15,23,42,0.55);
+        margin-bottom: 10px;
+        transition: all .25s ease;
+    }
+    .agent-card.running {
+        border-color: rgba(96,165,250,0.65);
+        box-shadow: 0 0 0 3px rgba(59,130,246,0.18), 0 8px 30px -10px rgba(59,130,246,0.45);
+        background: rgba(30,58,138,0.35);
+    }
+    .agent-card.done {
+        border-color: rgba(34,197,94,0.55);
+        background: rgba(6,78,59,0.25);
+    }
+    .agent-card.pending { opacity: 0.65; }
+
+    .agent-icon {
+        width: 44px; height: 44px; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 22px;
+        background: rgba(99,102,241,0.15);
+        border: 1px solid rgba(148,163,184,0.18);
+    }
+    .agent-meta { flex: 1; }
+    .agent-title { font-weight: 700; color: #f1f5f9; font-size: 0.98rem; }
+    .agent-sub { color: #94a3b8; font-size: 0.82rem; margin-top: 2px; }
+
+    .status-pill {
+        font-size: 0.72rem; font-weight: 700; letter-spacing: 0.04em;
+        padding: 5px 10px; border-radius: 999px; text-transform: uppercase;
+    }
+    .pill-pending { background: rgba(148,163,184,0.18); color: #cbd5e1; }
+    .pill-running { background: rgba(59,130,246,0.22); color: #93c5fd; }
+    .pill-done    { background: rgba(34,197,94,0.20);  color: #86efac; }
+    .pill-error   { background: rgba(239,68,68,0.22);  color: #fca5a5; }
+
+    /* Spinning dot for running */
+    .spinner {
+        width: 10px; height: 10px; border-radius: 50%;
+        background: #60a5fa;
+        box-shadow: 0 0 0 0 rgba(96,165,250,0.7);
+        animation: pulse 1.2s infinite;
+        display: inline-block; margin-right: 6px;
+    }
+    @keyframes pulse {
+        0%   { box-shadow: 0 0 0 0 rgba(96,165,250,0.7); }
+        70%  { box-shadow: 0 0 0 10px rgba(96,165,250,0); }
+        100% { box-shadow: 0 0 0 0 rgba(96,165,250,0); }
+    }
+
+    /* Stat tiles */
+    .stat {
+        padding: 14px 16px; border-radius: 14px;
+        border: 1px solid rgba(148,163,184,0.18);
+        background: rgba(15,23,42,0.55);
+    }
+    .stat .label { color: #94a3b8; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+    .stat .value { color: #f8fafc; font-size: 1.4rem; font-weight: 800; margin-top: 4px; }
+
+    /* Report panel */
+    .report {
+        padding: 22px 26px; border-radius: 16px;
+        background: rgba(15,23,42,0.65);
+        border: 1px solid rgba(148,163,184,0.18);
+    }
+
+    /* Hide default Streamlit chrome a bit */
+    #MainMenu, footer { visibility: hidden; }
+</style>
+"""
+st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
+
+
+# ============================================================
+# HERO
+# ============================================================
+st.markdown(
+    """
+    <div class="hero">
+        <h1>🧠 Research Mind</h1>
+        <p>A multi-agent research system — Search → Read → Write → Critique. Live agent telemetry below.</p>
     </div>
-    """, unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
 
 
-# ── Session state init ────────────────────────────────────────────────────────
-for key in ("results", "running", "done", "topic_input"):
-    if key not in st.session_state:
-        st.session_state[key] = {} if key == "results" else "" if key == "topic_input" else False
-
-
-# ── Hero ──────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="hero">
-    <div class="hero-eyebrow">Multi-Agent AI System</div>
-    <h1>Research<span>Mind</span></h1>
-    <p class="hero-sub">
-        Four specialized AI agents collaborate — searching, scraping, writing,
-        and critiquing — to deliver a polished research report on any topic.
-    </p>
-</div>
-<div class="divider"></div>
-""", unsafe_allow_html=True)
-
-
-# ── Layout: input left, pipeline right ───────────────────────────────────────
-col_input, col_spacer, col_pipeline = st.columns([5, 0.5, 4])
-
-with col_input:
-    topic = st.text_input(
-        "Research Topic",
-        placeholder="e.g. Quantum computing breakthroughs in 2025",
-        key="topic_input",
+# ============================================================
+# SIDEBAR — INPUT
+# ============================================================
+with st.sidebar:
+    st.markdown("### ⚙️ Research Settings")
+    topic = st.text_area(
+        "Research topic",
+        placeholder="e.g. Impact of generative AI on scientific peer review (2024–2025)",
+        height=110,
     )
-    run_btn = st.button("⚡  Run Research Pipeline", use_container_width=True)
-
-    # Example chips
-    st.markdown("""<div style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:1.5rem;"><span style="font-family:'DM Mono',monospace;font-size:0.68rem;color:#605850;letter-spacing:0.1em;">TRY →</span>""", unsafe_allow_html=True)
-    for ex in ["LLM agents 2025", "CRISPR gene editing", "Fusion energy progress"]:
-        st.markdown(f"""<span style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); border-radius:6px; padding:0.25rem 0.7rem; font-size:0.75rem; color:#a09890; font-family:'DM Sans',sans-serif;">{ex}</span>""", unsafe_allow_html=True)
-    st.markdown("</div>", unsafe_allow_html=True)
-
-with col_pipeline:
-    st.markdown('<div class="section-heading">Pipeline</div>', unsafe_allow_html=True)
-    
-    r = st.session_state.results
-    def s(step):
-        if not r: return "waiting"
-        steps = ["search", "reader", "writer", "critic"]
-        if step in r: return "done"
-        if st.session_state.running:
-            for k in steps:
-                if k not in r: return "running" if k == step else "waiting"
-        return "waiting"
-
-    step_card("01", "Search Agent",  s("search"), "Gathers recent web information")
-    step_card("02", "Reader Agent",  s("reader"), "Scrapes & extracts deep content")
-    step_card("03", "Writer Chain",  s("writer"), "Drafts the full research report")
-    step_card("04", "Critic Chain",  s("critic"), "Reviews & scores the report")
+    st.caption("Tip: be specific — include scope, timeframe, and angle.")
+    run_btn = st.button("🚀 Run Research Pipeline", type="primary", use_container_width=True)
+    st.divider()
+    st.markdown("#### 🤖 Agents")
+    st.markdown(
+        "- 🔎 **Search Agent** — finds sources\n"
+        "- 📖 **Reader Agent** — scrapes & extracts\n"
+        "- ✍️ **Writer Agent** — drafts the report\n"
+        "- 🧪 **Critic Agent** — reviews & scores"
+    )
 
 
-# ── Pipeline Execution ────────────────────────────────────────────────────────
-if run_btn and not st.session_state.running:
+# ============================================================
+# AGENT DEFINITIONS
+# ============================================================
+AGENTS = [
+    {"key": "search",  "icon": "🔎", "title": "Search Agent",  "sub": "Finding recent, reliable sources"},
+    {"key": "read",    "icon": "📖", "title": "Reader Agent",  "sub": "Scraping & extracting content"},
+    {"key": "writer",  "icon": "✍️", "title": "Writer Agent",  "sub": "Drafting structured report"},
+    {"key": "critic",  "icon": "🧪", "title": "Critic Agent",  "sub": "Reviewing & scoring quality"},
+]
+
+
+def render_agent_panel(placeholder, statuses, timings):
+    """Render the live agent status panel."""
+    html = ['<div>']
+    for a in AGENTS:
+        s = statuses.get(a["key"], "pending")
+        t = timings.get(a["key"])
+        time_str = f" • {t:.1f}s" if t is not None else ""
+
+        if s == "running":
+            pill = '<span class="status-pill pill-running"><span class="spinner"></span>Running</span>'
+            cls = "running"
+        elif s == "done":
+            pill = '<span class="status-pill pill-done">✓ Done</span>'
+            cls = "done"
+        elif s == "error":
+            pill = '<span class="status-pill pill-error">✕ Error</span>'
+            cls = "done"
+        else:
+            pill = '<span class="status-pill pill-pending">Pending</span>'
+            cls = "pending"
+
+        html.append(
+f"""<div class="agent-card {cls}">
+    <div class="agent-icon">{a['icon']}</div>
+    <div class="agent-meta">
+        <div class="agent-title">{a['title']}</div>
+        <div class="agent-sub">{a['sub']}{time_str}</div>
+    </div>
+    {pill}
+</div>"""
+        )
+    html.append("</div>")
+    placeholder.markdown("".join(html), unsafe_allow_html=True)
+
+
+def extract_content(result):
+    """Pull text content from LangChain message-like or plain results."""
+    if isinstance(result, dict) and "messages" in result:
+        last = result["messages"][-1]
+        return getattr(last, "content", str(last))
+    return getattr(result, "content", str(result))
+
+
+# ============================================================
+# RUN PIPELINE
+# ============================================================
+if "results" not in st.session_state:
+    st.session_state.results = None
+
+if run_btn:
     if not topic.strip():
         st.warning("Please enter a research topic first.")
-    else:
-        st.session_state.results = {}
-        st.session_state.running = True
-        st.session_state.done = False
-        st.rerun()
+        st.stop()
 
-if st.session_state.running and not st.session_state.done:
-    results = st.session_state.results
-    topic_val = st.session_state.topic_input
+    # Layout: agent panel on the left, live progress on the right
+    left, right = st.columns([1, 1.2], gap="large")
+    with left:
+        st.markdown("#### 🛰️ Agent Pipeline")
+        agent_panel = st.empty()
+    with right:
+        st.markdown("#### 📡 Live Progress")
+        progress = st.progress(0, text="Initializing pipeline…")
+        status_box = st.empty()
 
-    # ── Step 1: Search ──
-    if "search" not in results:
-        with st.spinner("🔍  Search Agent is working…"):
-            agent = build_search_agent()
-            res = agent.invoke({"messages": [("user", f"Recent info on: {topic_val}")]})
-            results["search"] = res["messages"][-1].content
-            st.session_state.results = results
-            st.rerun()
+    statuses = {a["key"]: "pending" for a in AGENTS}
+    timings = {}
+    render_agent_panel(agent_panel, statuses, timings)
 
-    # ── Step 2: Reader ──
-    if "reader" not in results:
-        with st.spinner("📄  Reader Agent is scraping top resources…"):
-            agent = build_read_agent()
-            res = agent.invoke({"messages": [("user", f"Context: {topic_val}\nSearch:\n{results['search'][:800]}")]})
-            results["reader"] = res["messages"][-1].content
-            st.session_state.results = results
-            st.rerun()
+    results = {}
+    overall_start = time.time()
 
-    # ── Step 3: Writer ──
-    if "writer" not in results:
-        with st.spinner("✍️  Writer is drafting the report…"):
-            res = writer_chain.invoke({"topic": topic_val, "research": f"{results['search']}\n{results['reader']}"})
-            results["writer"] = res
-            st.session_state.results = results
-            st.rerun()
+    try:
+        # ---- 1) SEARCH AGENT ----
+        statuses["search"] = "running"
+        render_agent_panel(agent_panel, statuses, timings)
+        status_box.info("🔎 Searching the web for high-signal sources…")
+        progress.progress(10, text="Search Agent working…")
+        t0 = time.time()
 
-    # ── Step 4: Critic ──
-    if "critic" not in results:
-        with st.spinner("🧐  Critic is reviewing the report…"):
-            res = critic_chain.invoke({"report": results["writer"]})
-            results["critic"] = res
-            st.session_state.results = results
-            st.session_state.running = False
-            st.session_state.done = True
-            st.rerun()
+        search_agent = build_search_agent()
+        search_results = search_agent.invoke({
+            "messages": [("user", f"Find recent, reliable and detailed information about: {topic}")]
+        })
+        results["search"] = extract_content(search_results)
+
+        timings["search"] = time.time() - t0
+        statuses["search"] = "done"
+        render_agent_panel(agent_panel, statuses, timings)
+        progress.progress(35, text="Search complete ✓")
+
+        # ---- 2) READER AGENT ----
+        statuses["read"] = "running"
+        render_agent_panel(agent_panel, statuses, timings)
+        status_box.info("📖 Reading and extracting content from sources…")
+        t0 = time.time()
+
+        read_agent = build_read_agent()
+        read_results = read_agent.invoke({
+            "messages": [("user", f"Read and extract key information from these sources:\n{results['search']}")]
+        })
+        results["read"] = extract_content(read_results)
+
+        timings["read"] = time.time() - t0
+        statuses["read"] = "done"
+        render_agent_panel(agent_panel, statuses, timings)
+        progress.progress(60, text="Reading complete ✓")
+
+        # ---- 3) WRITER AGENT ----
+        statuses["writer"] = "running"
+        render_agent_panel(agent_panel, statuses, timings)
+        status_box.info("✍️ Writing structured research report…")
+        t0 = time.time()
+
+        draft = writer_chain.invoke({"topic": topic, "research": results["read"]})
+        results["draft"] = extract_content(draft)
+
+        timings["writer"] = time.time() - t0
+        statuses["writer"] = "done"
+        render_agent_panel(agent_panel, statuses, timings)
+        progress.progress(85, text="Draft complete ✓")
+
+        # ---- 4) CRITIC AGENT ----
+        statuses["critic"] = "running"
+        render_agent_panel(agent_panel, statuses, timings)
+        status_box.info("🧪 Critiquing and scoring the draft…")
+        t0 = time.time()
+
+        critique = critic_chain.invoke({"report": results["draft"]})
+        results["critic"] = extract_content(critique)
+
+        timings["critic"] = time.time() - t0
+        statuses["critic"] = "done"
+        render_agent_panel(agent_panel, statuses, timings)
+        progress.progress(100, text="All agents finished ✓")
+        status_box.success(f"✅ Research complete in {time.time() - overall_start:.1f}s")
+
+        results["topic"] = topic
+        results["total_time"] = time.time() - overall_start
+        results["timings"] = timings
+        st.session_state.results = results
+
+    except Exception as e:
+        # mark current running agent as error
+        for k, v in statuses.items():
+            if v == "running":
+                statuses[k] = "error"
+        render_agent_panel(agent_panel, statuses, timings)
+        status_box.error(f"❌ Pipeline failed: {e}")
+        st.exception(e)
+        st.stop()
 
 
-# ── Results display ───────────────────────────────────────────────────────────
-r = st.session_state.results
-if r and st.session_state.done:
-    st.markdown('<div class="divider"></div><div class="section-heading">Results</div>', unsafe_allow_html=True)
-    
-    if "search" in r:
-        with st.expander("🔍 Search Results (raw)", expanded=False):
-            st.markdown(f'<div class="result-panel"><div class="result-panel-title">Search Agent Output</div><div class="result-content">{r["search"]}</div></div>', unsafe_allow_html=True)
-    if "reader" in r:
-        with st.expander("📄 Scraped Content (raw)", expanded=False):
-            st.markdown(f'<div class="result-panel"><div class="result-panel-title">Reader Agent Output</div><div class="result-content">{r["reader"]}</div></div>', unsafe_allow_html=True)
-    if "writer" in r:
-        st.markdown('<div class="report-panel"><div class="panel-label orange">📝 Final Research Report</div>', unsafe_allow_html=True)
-        st.markdown(r["writer"])
+# ============================================================
+# RESULTS
+# ============================================================
+res = st.session_state.results
+if res:
+    st.markdown("---")
+
+    # Stat tiles
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown(f'<div class="stat"><div class="label">Total Time</div><div class="value">{res["total_time"]:.1f}s</div></div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown(f'<div class="stat"><div class="label">Search</div><div class="value">{res["timings"].get("search",0):.1f}s</div></div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown(f'<div class="stat"><div class="label">Reader</div><div class="value">{res["timings"].get("read",0):.1f}s</div></div>', unsafe_allow_html=True)
+    with c4:
+        st.markdown(f'<div class="stat"><div class="label">Writer</div><div class="value">{res["timings"].get("writer",0):.1f}s</div></div>', unsafe_allow_html=True)
+
+    st.markdown("")
+    st.markdown(f"### 📌 Topic\n> {res['topic']}")
+
+    tab1, tab2, tab3, tab4 = st.tabs(["📄 Final Report", "🧪 Critic Feedback", "🔎 Sources", "📖 Scraped Content"])
+
+    with tab1:
+        st.markdown('<div class="report">', unsafe_allow_html=True)
+        st.markdown(res.get("draft", "_No draft produced._"))
         st.markdown("</div>", unsafe_allow_html=True)
-        st.download_button(label="⬇  Download Report (.md)", data=r["writer"], file_name="research_report.md", mime="text/markdown")
-    if "critic" in r:
-        st.markdown('<div class="feedback-panel"><div class="panel-label green">🧐 Critic Feedback</div>', unsafe_allow_html=True)
-        st.markdown(r["critic"])
+        st.download_button(
+            "⬇️ Download Report (Markdown)",
+            data=res.get("draft", ""),
+            file_name=f"research_report_{int(time.time())}.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
+    with tab2:
+        st.markdown('<div class="report">', unsafe_allow_html=True)
+        st.markdown(res.get("critic", "_No critique produced._"))
         st.markdown("</div>", unsafe_allow_html=True)
 
+    with tab3:
+        with st.expander("Show raw search results", expanded=True):
+            st.markdown(res.get("search", "_No search output._"))
 
-# ── Footer ────────────────────────────────────────────────────────────────────
-st.markdown('<div class="notice">ResearchMind · Powered by LangChain multi-agent pipeline · Built with Streamlit</div>', unsafe_allow_html=True)
+    with tab4:
+        with st.expander("Show scraped content", expanded=True):
+            st.markdown(res.get("read", "_No scraped content._"))
+else:
+    st.info("👈 Enter a topic in the sidebar and click **Run Research Pipeline** to begin.")
